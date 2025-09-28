@@ -1,15 +1,19 @@
 # backend_app.py
-"""Blog backend with JSON file persistence.
+"""Blog backend with JSON file persistence, likes and comments.
 
 - Stores posts in posts.json (atomic writes, lock-protected)
-- CRUD endpoints:
-    * GET    /api/posts
-    * GET    /api/posts/<id>
-    * POST   /api/posts
-    * PUT    /api/posts/<id>
-    * DELETE /api/posts/<id>
-- Post fields: id (int), title (str), content (str),
-  author (str), date (YYYY-MM-DD, limited range)
+- Post fields: id, title, content, author, date (YYYY-MM-DD),
+               likes (int), comments (list of {id, author, text, date})
+- Endpoints:
+    GET    /api/health
+    GET    /api/posts
+    GET    /api/posts/<id>
+    POST   /api/posts
+    PUT    /api/posts/<id>
+    DELETE /api/posts/<id>
+    POST   /api/posts/<id>/like
+    GET    /api/posts/<id>/comments
+    POST   /api/posts/<id>/comments
 """
 
 from __future__ import annotations
@@ -19,8 +23,7 @@ from datetime import datetime
 from flask import Flask, jsonify, request, make_response
 
 try:
-    # Optional: enable CORS during dev if frontend runs on another port
-    from flask_cors import CORS
+    from flask_cors import CORS  # optional, for dev on different ports
 except ImportError:  # pragma: no cover
     CORS = None  # type: ignore
 
@@ -30,22 +33,20 @@ import tempfile
 import threading
 
 app = Flask(__name__)
-
 if CORS:
-    CORS(app)  # enable CORS for all routes
+    CORS(app)
 
 # ----------------------- File persistence -----------------------
 
 _STORAGE_FILE = os.path.join(os.path.dirname(__file__), "posts.json")
 _LOCK = threading.Lock()
 
-# Realistischer Datumsbereich
+# Realistic date range
 MIN_DATE = datetime(1900, 1, 1)
 MAX_DATE = datetime(2100, 12, 31)
 
 
 def _atomic_write(path: str, data: str) -> None:
-    """Atomically write data to disk to avoid partial writes."""
     dir_ = os.path.dirname(path) or "."
     fd, tmp_path = tempfile.mkstemp(prefix=".__tmp__", dir=dir_)
     try:
@@ -61,7 +62,6 @@ def _atomic_write(path: str, data: str) -> None:
 
 
 def _load_posts() -> List[Dict[str, Any]]:
-    """Load posts list from JSON; create file with seed if missing/invalid."""
     if not os.path.exists(_STORAGE_FILE):
         seed = [
             {
@@ -70,6 +70,8 @@ def _load_posts() -> List[Dict[str, Any]]:
                 "content": "This is the first post.",
                 "author": "System",
                 "date": "2023-01-01",
+                "likes": 0,
+                "comments": [],
             },
             {
                 "id": 2,
@@ -77,6 +79,8 @@ def _load_posts() -> List[Dict[str, Any]]:
                 "content": "This is the second post.",
                 "author": "System",
                 "date": "2023-01-02",
+                "likes": 0,
+                "comments": [],
             },
         ]
         _save_posts(seed)
@@ -87,19 +91,16 @@ def _load_posts() -> List[Dict[str, Any]]:
             data = json.load(f)
             return data if isinstance(data, list) else []
     except (json.JSONDecodeError, OSError):
-        # Corrupt or unreadable file -> fall back to empty list
         return []
 
 
 def _save_posts(posts: List[Dict[str, Any]]) -> None:
-    """Persist full posts list to disk (thread-safe, atomic)."""
     with _LOCK:
         payload = json.dumps(posts, ensure_ascii=False, indent=2)
         _atomic_write(_STORAGE_FILE, payload)
 
 
 def _next_id(posts: List[Dict[str, Any]]) -> int:
-    """Generate next available ID for a post list."""
     return max((int(p.get("id", 0)) for p in posts), default=0) + 1
 
 
@@ -110,7 +111,6 @@ def _as_str(x: Any) -> str:
 
 
 def _parse_date_str(date_str: str) -> Optional[datetime]:
-    """Validate 'YYYY-MM-DD' within MIN_DATE..MAX_DATE."""
     if not date_str:
         return None
     try:
@@ -123,14 +123,19 @@ def _parse_date_str(date_str: str) -> Optional[datetime]:
 
 
 def _serialize(p: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure consistent API shape."""
     return {
         "id": int(p["id"]),
         "title": p.get("title", ""),
         "content": p.get("content", ""),
         "author": p.get("author", ""),
         "date": p.get("date", ""),
+        "likes": int(p.get("likes", 0) or 0),
+        "comments": list(p.get("comments", [])),
     }
+
+
+def _find_post(posts: List[Dict[str, Any]], post_id: int) -> Optional[Dict[str, Any]]:
+    return next((p for p in posts if int(p.get("id")) == post_id), None)
 
 
 # ----------------------------- Endpoints -----------------------------
@@ -142,16 +147,14 @@ def health():
 
 @app.get("/api/posts")
 def list_posts():
-    """Return all posts (as stored)."""
     posts = _load_posts()
     return jsonify([_serialize(p) for p in posts])
 
 
 @app.get("/api/posts/<int:post_id>")
 def get_post(post_id: int):
-    """Return a single post by ID."""
     posts = _load_posts()
-    post = next((p for p in posts if int(p.get("id")) == post_id), None)
+    post = _find_post(posts, post_id)
     if not post:
         return jsonify({"message": f"Post with id {post_id} was not found."}), 404
     return jsonify(_serialize(post))
@@ -159,7 +162,6 @@ def get_post(post_id: int):
 
 @app.post("/api/posts")
 def create_post():
-    """Create a new post. Body JSON must include: title, content, author, date."""
     data = request.get_json(silent=True) or {}
     title = _as_str(data.get("title"))
     content = _as_str(data.get("content"))
@@ -177,15 +179,10 @@ def create_post():
         missing_or_invalid.append("date")
 
     if missing_or_invalid:
-        return (
-            jsonify(
-                {
-                    "message": "Missing or invalid required field(s).",
-                    "missing": missing_or_invalid,
-                }
-            ),
-            400,
-        )
+        return jsonify({
+            "message": "Missing or invalid required field(s).",
+            "missing": missing_or_invalid,
+        }), 400
 
     posts = _load_posts()
     post = {
@@ -194,44 +191,43 @@ def create_post():
         "content": content,
         "author": author,
         "date": date_str,
+        "likes": 0,
+        "comments": [],
     }
     posts.append(post)
     _save_posts(posts)
-
-    resp = jsonify(_serialize(post))
-    return make_response(resp, 201)
+    return make_response(jsonify(_serialize(post)), 201)
 
 
 @app.put("/api/posts/<int:post_id>")
 def update_post(post_id: int):
-    """Update an existing post. Any of title/content/author/date may be provided."""
     posts = _load_posts()
-    target = next((p for p in posts if int(p.get("id")) == post_id), None)
+    target = _find_post(posts, post_id)
     if not target:
         return jsonify({"message": f"Post with id {post_id} was not found."}), 404
 
     data = request.get_json(silent=True) or {}
 
     if "title" in data:
-        new_title = _as_str(data["title"])
-        if new_title:
-            target["title"] = new_title
+        v = _as_str(data["title"])
+        if v:
+            target["title"] = v
     if "content" in data:
-        new_content = _as_str(data["content"])
-        if new_content:
-            target["content"] = new_content
+        v = _as_str(data["content"])
+        if v:
+            target["content"] = v
     if "author" in data:
-        new_author = _as_str(data["author"])
-        if new_author:
-            target["author"] = new_author
+        v = _as_str(data["author"])
+        if v:
+            target["author"] = v
     if "date" in data:
-        new_date = _as_str(data["date"])
-        if new_date:
-            if _parse_date_str(new_date) is None:
-                return jsonify(
-                    {"message": "Invalid date (YYYY-MM-DD within 1900-01-01..2100-12-31)."}
-                ), 400
-            target["date"] = new_date
+        v = _as_str(data["date"])
+        if v:
+            if _parse_date_str(v) is None:
+                return jsonify({
+                    "message": "Invalid date (YYYY-MM-DD within 1900-01-01..2100-12-31)."
+                }), 400
+            target["date"] = v
 
     _save_posts(posts)
     return jsonify(_serialize(target))
@@ -239,7 +235,6 @@ def update_post(post_id: int):
 
 @app.delete("/api/posts/<int:post_id>")
 def delete_post(post_id: int):
-    """Delete a post by ID."""
     posts = _load_posts()
     remaining = [p for p in posts if int(p.get("id")) != post_id]
     if len(remaining) == len(posts):
@@ -247,6 +242,57 @@ def delete_post(post_id: int):
 
     _save_posts(remaining)
     return jsonify({"message": f"Post with id {post_id} has been deleted successfully."})
+
+
+# ----------------------------- Likes --------------------------------
+
+@app.post("/api/posts/<int:post_id>/like")
+def like_post(post_id: int):
+    posts = _load_posts()
+    target = _find_post(posts, post_id)
+    if not target:
+        return jsonify({"message": f"Post with id {post_id} was not found."}), 404
+    target["likes"] = int(target.get("likes", 0) or 0) + 1
+    _save_posts(posts)
+    return jsonify({"id": post_id, "likes": int(target["likes"])}), 200
+
+
+# ---------------------------- Comments ------------------------------
+
+@app.get("/api/posts/<int:post_id>/comments")
+def list_comments(post_id: int):
+    posts = _load_posts()
+    target = _find_post(posts, post_id)
+    if not target:
+        return jsonify({"message": f"Post with id {post_id} was not found."}), 404
+    return jsonify(list(target.get("comments", [])))
+
+
+@app.post("/api/posts/<int:post_id>/comments")
+def add_comment(post_id: int):
+    posts = _load_posts()
+    target = _find_post(posts, post_id)
+    if not target:
+        return jsonify({"message": f"Post with id {post_id} was not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    author = _as_str(data.get("author"))
+    text = _as_str(data.get("text"))
+    if not author or not text:
+        return jsonify({"message": "author and text are required"}), 400
+
+    comments: List[Dict[str, Any]] = list(target.get("comments", []))
+    new_comment = {
+        "id": (max((int(c.get("id", 0)) for c in comments), default=0) + 1),
+        "author": author,
+        "text": text,
+        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+    }
+    comments.append(new_comment)
+    target["comments"] = comments
+    _save_posts(posts)
+
+    return make_response(jsonify(new_comment), 201)
 
 
 if __name__ == "__main__":
