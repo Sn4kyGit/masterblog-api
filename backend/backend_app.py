@@ -4,6 +4,7 @@
 Endpoints:
 - GET    /api/health
 - GET    /api/posts
+- GET    /api/posts/search?title=...&content=...
 - POST   /api/posts
 - PUT    /api/posts/<id>
 - DELETE /api/posts/<id>
@@ -86,6 +87,39 @@ def get_posts():
     )
 
 
+@app.get("/api/posts/search")
+def search_posts():
+    """Search posts by title and/or content (case-insensitive contains).
+
+    Query params:
+      - title:   substring to match in post title (optional)
+      - content: substring to match in post content (optional)
+
+    Filtering rules:
+      - If a param is provided, the corresponding field must contain it.
+      - If both provided, both conditions must hold (AND).
+      - If none provided, return all posts (same as list).
+    """
+    title_q = (request.args.get("title") or "").strip().lower()
+    content_q = (request.args.get("content") or "").strip().lower()
+
+    posts = _load_posts()
+
+    def matches(p: Dict[str, Any]) -> bool:
+        t = str(p.get("title", "")).lower()
+        c = str(p.get("content", "")).lower()
+        if title_q and title_q not in t:
+            return False
+        if content_q and content_q not in c:
+            return False
+        return True
+
+    filtered = [p for p in posts if matches(p)]
+    return jsonify(
+        [{"id": int(p["id"]), "title": p["title"], "content": p["content"]} for p in filtered]
+    )
+
+
 @app.post("/api/posts")
 def create_post():
     """Create a new post from JSON body: {title, content} -> 201 + post JSON."""
@@ -119,29 +153,21 @@ def create_post():
 
 @app.put("/api/posts/<int:post_id>")
 def update_post(post_id: int):
-    """Update an existing post (title/content optional).
-
-    Body JSON (all optional):
-      { "title": "<new title>", "content": "<new content>" }
-
-    Empty strings are ignored (keep current). Returns 404 if not found.
-    """
+    """Update an existing post (title/content optional)."""
     posts = _load_posts()
-    # find post
     target = next((p for p in posts if int(p.get("id")) == post_id), None)
     if not target:
         return jsonify({"message": f"Post with id {post_id} was not found."}), 404
 
     data = request.get_json(silent=True) or {}
 
-    # Only update if provided and non-empty after strip
     if "title" in data:
-        new_title = str(data["title"]).strip() if data["title"] is not None else ""
+        new_title = "" if data["title"] is None else str(data["title"]).strip()
         if new_title:
             target["title"] = new_title
 
     if "content" in data:
-        new_content = str(data["content"]).strip() if data["content"] is not None else ""
+        new_content = "" if data["content"] is None else str(data["content"]).strip()
         if new_content:
             target["content"] = new_content
 
@@ -166,5 +192,4 @@ def delete_post(post_id: int):
 
 
 if __name__ == "__main__":
-    # Adjust port to match your frontend expectations
     app.run(host="0.0.0.0", port=5002, debug=True)
