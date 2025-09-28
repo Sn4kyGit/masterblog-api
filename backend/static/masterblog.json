@@ -1,0 +1,243 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Masterblog API",
+    "version": "1.0.0",
+    "description": "Simple blog API with CRUD, search and sorting."
+  },
+  "servers": [
+    { "url": "http://localhost:5002" }
+  ],
+  "tags": [
+    { "name": "Health", "description": "Health check" },
+    { "name": "Post", "description": "Post API - CRUD & utilities" }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health check",
+        "tags": ["Health"],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "examples": {
+                  "ok": { "value": { "status": "ok" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/posts": {
+      "get": {
+        "summary": "Returns all posts (optionally sorted)",
+        "tags": ["Post"],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": { "type": "string", "enum": ["title", "content"] },
+            "description": "Optional sort field"
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": { "type": "string", "enum": ["asc", "desc"] },
+            "description": "Sort direction (asc/desc). Defaults to asc when sort is provided."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of posts",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Post" } }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid sorting parameters",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new post",
+        "tags": ["Post"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NewPost" },
+              "examples": {
+                "example": { "value": { "title": "My post", "content": "Hello world" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Post created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Post" } } }
+          },
+          "400": {
+            "description": "Missing or empty required fields",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/posts/search": {
+      "get": {
+        "summary": "Search posts by title and/or content (case-insensitive contains)",
+        "tags": ["Post"],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "title",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Substring to match in title"
+          },
+          {
+            "in": "query",
+            "name": "content",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Substring to match in content"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching posts (empty array if none)",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Post" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/posts/{id}": {
+      "put": {
+        "summary": "Update an existing post (title/content optional)",
+        "tags": ["Post"],
+        "parameters": [
+          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdatePost" },
+              "examples": {
+                "example1": { "value": { "title": "New title" } },
+                "example2": { "value": { "content": "New content" } },
+                "example3": { "value": { "title": "New title", "content": "New content" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated post",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Post" } } }
+          },
+          "404": {
+            "description": "Post not found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a post by ID",
+        "tags": ["Post"],
+        "parameters": [
+          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deletion message",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeleteResponse" } } }
+          },
+          "404": {
+            "description": "Post not found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Post": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "title": { "type": "string" },
+          "content": { "type": "string" }
+        },
+        "required": ["id", "title", "content"]
+      },
+      "NewPost": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "content": { "type": "string" }
+        },
+        "required": ["title", "content"]
+      },
+      "UpdatePost": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "nullable": true },
+          "content": { "type": "string", "nullable": true }
+        },
+        "additionalProperties": false
+      },
+      "DeleteResponse": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" }
+        },
+        "required": ["message"]
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "ok" }
+        },
+        "required": ["status"]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" }
+        },
+        "required": ["message"]
+      },
+      "ValidationError": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string", "example": "Missing or empty required field(s)." },
+          "missing": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["title", "content"] }
+          }
+        },
+        "required": ["message"]
+      }
+    }
+  }
+}

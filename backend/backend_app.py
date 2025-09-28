@@ -1,13 +1,16 @@
 # backend_app.py
-"""Blog backend with CORS, file persistence and sorting/search.
+"""Blog backend with CORS, file persistence, search, sorting and Swagger UI.
 
 Endpoints:
 - GET    /api/health
-- GET    /api/posts                      (optional ?sort=title|content&direction=asc|desc)
+- GET    /api/posts                      (?sort=title|content&direction=asc|desc)
 - GET    /api/posts/search?title=&content=
 - POST   /api/posts
 - PUT    /api/posts/<id>
 - DELETE /api/posts/<id>
+
+Docs:
+- Swagger UI at /api/docs (serves backend/static/masterblog.json)
 """
 
 from __future__ import annotations
@@ -16,15 +19,29 @@ from typing import Any, Dict, List
 
 from flask import Flask, jsonify, make_response, request
 from flask_cors import CORS
+from flask_swagger_ui import get_swaggerui_blueprint  # <-- Swagger UI
 import json
 import os
 import tempfile
 import threading
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
 CORS(app)  # enable CORS for all routes
 
-# ----------------------- file-backed storage -----------------------
+# ----------------------- Swagger UI config -----------------------
+# (1) UI Endpoint
+SWAGGER_URL = "/api/docs"
+# (2) JSON definition served from Flask's /static directory
+API_URL = "/static/masterblog.json"
+# (3) App name in the UI header
+swagger_ui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+    config={"app_name": "Masterblog API"},
+)
+app.register_blueprint(swagger_ui_blueprint, url_prefix=SWAGGER_URL)
+
+# ----------------------- file-backed storage ---------------------
 _STORAGE_FILE = os.path.join(os.path.dirname(__file__), "posts.json")
 _LOCK = threading.Lock()
 
@@ -72,7 +89,7 @@ def _next_id(posts: List[Dict[str, Any]]) -> int:
     return max((int(p.get("id", 0)) for p in posts), default=0) + 1
 
 
-# ----------------------------- routes ------------------------------
+# ----------------------------- routes ----------------------------
 @app.get("/api/health")
 def health():
     return jsonify(status="ok")
@@ -85,8 +102,6 @@ def get_posts():
     Query params (optional):
       - sort:      'title' | 'content'
       - direction: 'asc' | 'desc'   (default 'asc' when sort is provided)
-
-    If no sorting params are provided, return in original persisted order.
     """
     posts = _load_posts()
 
@@ -94,46 +109,22 @@ def get_posts():
     direction = request.args.get("direction")
 
     if sort_field is None and direction is None:
-        # No sorting params -> keep original order
         return jsonify(
             [{"id": int(p["id"]), "title": p["title"], "content": p["content"]} for p in posts]
         )
 
-    # Validate sort field
     allowed_fields = {"title", "content"}
     if sort_field not in allowed_fields:
-        return (
-            jsonify(
-                {
-                    "message": "Invalid 'sort' parameter.",
-                    "allowed": sorted(allowed_fields),
-                }
-            ),
-            400,
-        )
+        return jsonify({"message": "Invalid 'sort' parameter.", "allowed": sorted(allowed_fields)}), 400
 
-    # Validate direction (default asc if sort provided without direction)
     if direction is None:
         direction = "asc"
     allowed_dirs = {"asc", "desc"}
     if direction not in allowed_dirs:
-        return (
-            jsonify(
-                {
-                    "message": "Invalid 'direction' parameter.",
-                    "allowed": sorted(allowed_dirs),
-                }
-            ),
-            400,
-        )
+        return jsonify({"message": "Invalid 'direction' parameter.", "allowed": sorted(allowed_dirs)}), 400
 
     reverse = direction == "desc"
-    # Use a stable sort; missing fields treated as empty string
-    sorted_posts = sorted(
-        posts,
-        key=lambda p: str(p.get(sort_field, "")).lower(),
-        reverse=reverse,
-    )
+    sorted_posts = sorted(posts, key=lambda p: str(p.get(sort_field, "")).lower(), reverse=reverse)
 
     return jsonify(
         [{"id": int(p["id"]), "title": p["title"], "content": p["content"]} for p in sorted_posts]
@@ -180,10 +171,7 @@ def create_post():
         missing.append("content")
 
     if missing:
-        return (
-            jsonify({"message": "Missing or empty required field(s).", "missing": missing}),
-            400,
-        )
+        return jsonify({"message": "Missing or empty required field(s).", "missing": missing}), 400
 
     posts = _load_posts()
     post = {"id": _next_id(posts), "title": title, "content": content}
@@ -215,10 +203,7 @@ def update_post(post_id: int):
             target["content"] = new_content
 
     _save_posts(posts)
-
-    return jsonify(
-        {"id": int(target["id"]), "title": target["title"], "content": target["content"]}
-    ), 200
+    return jsonify({"id": int(target["id"]), "title": target["title"], "content": target["content"]}), 200
 
 
 @app.delete("/api/posts/<int:post_id>")
@@ -226,7 +211,6 @@ def delete_post(post_id: int):
     """Delete a post by its ID."""
     posts = _load_posts()
     remaining = [p for p in posts if int(p.get("id")) != post_id]
-
     if len(remaining) == len(posts):
         return jsonify({"message": f"Post with id {post_id} was not found."}), 404
 
