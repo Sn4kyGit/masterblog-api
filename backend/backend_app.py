@@ -1,10 +1,10 @@
 # backend_app.py
-"""Blog backend with CORS and file persistence.
+"""Blog backend with CORS, file persistence and sorting/search.
 
 Endpoints:
 - GET    /api/health
-- GET    /api/posts
-- GET    /api/posts/search?title=...&content=...
+- GET    /api/posts                      (optional ?sort=title|content&direction=asc|desc)
+- GET    /api/posts/search?title=&content=
 - POST   /api/posts
 - PUT    /api/posts/<id>
 - DELETE /api/posts/<id>
@@ -80,26 +80,69 @@ def health():
 
 @app.get("/api/posts")
 def get_posts():
-    """Return all posts (id/title/content)."""
+    """Return all posts with optional sorting.
+
+    Query params (optional):
+      - sort:      'title' | 'content'
+      - direction: 'asc' | 'desc'   (default 'asc' when sort is provided)
+
+    If no sorting params are provided, return in original persisted order.
+    """
     posts = _load_posts()
+
+    sort_field = request.args.get("sort")
+    direction = request.args.get("direction")
+
+    if sort_field is None and direction is None:
+        # No sorting params -> keep original order
+        return jsonify(
+            [{"id": int(p["id"]), "title": p["title"], "content": p["content"]} for p in posts]
+        )
+
+    # Validate sort field
+    allowed_fields = {"title", "content"}
+    if sort_field not in allowed_fields:
+        return (
+            jsonify(
+                {
+                    "message": "Invalid 'sort' parameter.",
+                    "allowed": sorted(allowed_fields),
+                }
+            ),
+            400,
+        )
+
+    # Validate direction (default asc if sort provided without direction)
+    if direction is None:
+        direction = "asc"
+    allowed_dirs = {"asc", "desc"}
+    if direction not in allowed_dirs:
+        return (
+            jsonify(
+                {
+                    "message": "Invalid 'direction' parameter.",
+                    "allowed": sorted(allowed_dirs),
+                }
+            ),
+            400,
+        )
+
+    reverse = direction == "desc"
+    # Use a stable sort; missing fields treated as empty string
+    sorted_posts = sorted(
+        posts,
+        key=lambda p: str(p.get(sort_field, "")).lower(),
+        reverse=reverse,
+    )
+
     return jsonify(
-        [{"id": int(p["id"]), "title": p["title"], "content": p["content"]} for p in posts]
+        [{"id": int(p["id"]), "title": p["title"], "content": p["content"]} for p in sorted_posts]
     )
 
 
 @app.get("/api/posts/search")
 def search_posts():
-    """Search posts by title and/or content (case-insensitive contains).
-
-    Query params:
-      - title:   substring to match in post title (optional)
-      - content: substring to match in post content (optional)
-
-    Filtering rules:
-      - If a param is provided, the corresponding field must contain it.
-      - If both provided, both conditions must hold (AND).
-      - If none provided, return all posts (same as list).
-    """
+    """Search posts by title and/or content (case-insensitive contains)."""
     title_q = (request.args.get("title") or "").strip().lower()
     content_q = (request.args.get("content") or "").strip().lower()
 
