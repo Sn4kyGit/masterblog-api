@@ -1,5 +1,13 @@
 # backend_app.py
-"""Blog backend with CORS, GET/POST/DELETE /api/posts and file persistence."""
+"""Blog backend with CORS and file persistence.
+
+Endpoints:
+- GET    /api/health
+- GET    /api/posts
+- POST   /api/posts
+- PUT    /api/posts/<id>
+- DELETE /api/posts/<id>
+"""
 
 from __future__ import annotations
 
@@ -37,7 +45,7 @@ def _atomic_write(path: str, data: str) -> None:
 
 
 def _load_posts() -> List[Dict[str, Any]]:
-    """Load list of posts from JSON file (create seed if missing)."""
+    """Load list of posts from JSON file (seed if missing)."""
     if not os.path.exists(_STORAGE_FILE):
         seed = [
             {"id": 1, "title": "First post", "content": "This is the first post."},
@@ -109,18 +117,48 @@ def create_post():
     return make_response(resp, 201)
 
 
+@app.put("/api/posts/<int:post_id>")
+def update_post(post_id: int):
+    """Update an existing post (title/content optional).
+
+    Body JSON (all optional):
+      { "title": "<new title>", "content": "<new content>" }
+
+    Empty strings are ignored (keep current). Returns 404 if not found.
+    """
+    posts = _load_posts()
+    # find post
+    target = next((p for p in posts if int(p.get("id")) == post_id), None)
+    if not target:
+        return jsonify({"message": f"Post with id {post_id} was not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+
+    # Only update if provided and non-empty after strip
+    if "title" in data:
+        new_title = str(data["title"]).strip() if data["title"] is not None else ""
+        if new_title:
+            target["title"] = new_title
+
+    if "content" in data:
+        new_content = str(data["content"]).strip() if data["content"] is not None else ""
+        if new_content:
+            target["content"] = new_content
+
+    _save_posts(posts)
+
+    return jsonify(
+        {"id": int(target["id"]), "title": target["title"], "content": target["content"]}
+    ), 200
+
+
 @app.delete("/api/posts/<int:post_id>")
 def delete_post(post_id: int):
-    """Delete a post by its ID.
-
-    Success: 200 + {"message": "Post with id <id> has been deleted successfully."}
-    Not found: 404 + {"message": "Post with id <id> was not found."}
-    """
+    """Delete a post by its ID."""
     posts = _load_posts()
     remaining = [p for p in posts if int(p.get("id")) != post_id]
 
     if len(remaining) == len(posts):
-        # nothing removed -> not found
         return jsonify({"message": f"Post with id {post_id} was not found."}), 404
 
     _save_posts(remaining)
@@ -128,5 +166,5 @@ def delete_post(post_id: int):
 
 
 if __name__ == "__main__":
-    # run on the same port your frontend expects (adjust if needed)
+    # Adjust port to match your frontend expectations
     app.run(host="0.0.0.0", port=5002, debug=True)
