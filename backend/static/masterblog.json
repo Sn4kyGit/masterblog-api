@@ -1,243 +1,266 @@
 {
-  "openapi": "3.0.0",
+  "swagger": "2.0",
   "info": {
     "title": "Masterblog API",
-    "version": "1.0.0",
-    "description": "Simple blog API with CRUD, search and sorting."
+    "version": "1.1.0",
+    "description": "CRUD for posts with likes and comments. Dates use YYYY-MM-DD (1900-01-01 .. 2100-12-31)."
   },
-  "servers": [
-    { "url": "http://localhost:5002" }
-  ],
+  "host": "localhost:5002",
+  "basePath": "/",
+  "schemes": ["http"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+
   "tags": [
-    { "name": "Health", "description": "Health check" },
-    { "name": "Post", "description": "Post API - CRUD & utilities" }
+    { "name": "Health", "description": "Service health" },
+    { "name": "Post", "description": "Post CRUD & listing" },
+    { "name": "Like", "description": "Post likes" },
+    { "name": "Comment", "description": "Post comments" }
   ],
+
   "paths": {
     "/api/health": {
       "get": {
-        "summary": "Health check",
         "tags": ["Health"],
+        "summary": "Health check",
         "responses": {
-          "200": {
-            "description": "Service is healthy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                },
-                "examples": {
-                  "ok": { "value": { "status": "ok" } }
-                }
-              }
-            }
-          }
+          "200": { "description": "OK", "schema": { "$ref": "#/definitions/Health" } }
         }
       }
     },
+
     "/api/posts": {
       "get": {
-        "summary": "Returns all posts (optionally sorted)",
         "tags": ["Post"],
-        "parameters": [
-          {
-            "in": "query",
-            "name": "sort",
-            "required": false,
-            "schema": { "type": "string", "enum": ["title", "content"] },
-            "description": "Optional sort field"
-          },
-          {
-            "in": "query",
-            "name": "direction",
-            "required": false,
-            "schema": { "type": "string", "enum": ["asc", "desc"] },
-            "description": "Sort direction (asc/desc). Defaults to asc when sort is provided."
-          }
-        ],
+        "summary": "List all posts",
         "responses": {
           "200": {
-            "description": "List of posts",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Post" } }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid sorting parameters",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
-            }
+            "description": "Array of posts",
+            "schema": { "type": "array", "items": { "$ref": "#/definitions/Post" } }
           }
         }
       },
       "post": {
-        "summary": "Create a new post",
         "tags": ["Post"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/NewPost" },
-              "examples": {
-                "example": { "value": { "title": "My post", "content": "Hello world" } }
-              }
-            }
+        "summary": "Create a post",
+        "parameters": [
+          {
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": { "$ref": "#/definitions/PostCreate" }
           }
-        },
+        ],
         "responses": {
           "201": {
-            "description": "Post created",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Post" } } }
+            "description": "Created",
+            "headers": {
+              "Location": { "type": "string", "description": "URL of the created post" }
+            },
+            "schema": { "$ref": "#/definitions/Post" }
           },
-          "400": {
-            "description": "Missing or empty required fields",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationError" } } }
-          }
+          "400": { "description": "Bad Request", "schema": { "$ref": "#/definitions/Error" } },
+          "415": { "description": "Unsupported Media Type", "schema": { "$ref": "#/definitions/Error" } }
         }
       }
     },
-    "/api/posts/search": {
-      "get": {
-        "summary": "Search posts by title and/or content (case-insensitive contains)",
-        "tags": ["Post"],
-        "parameters": [
-          {
-            "in": "query",
-            "name": "title",
-            "required": false,
-            "schema": { "type": "string" },
-            "description": "Substring to match in title"
-          },
-          {
-            "in": "query",
-            "name": "content",
-            "required": false,
-            "schema": { "type": "string" },
-            "description": "Substring to match in content"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Matching posts (empty array if none)",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Post" } }
-              }
-            }
-          }
-        }
-      }
-    },
+
     "/api/posts/{id}": {
-      "put": {
-        "summary": "Update an existing post (title/content optional)",
+      "get": {
         "tags": ["Post"],
-        "parameters": [
-          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/UpdatePost" },
-              "examples": {
-                "example1": { "value": { "title": "New title" } },
-                "example2": { "value": { "content": "New content" } },
-                "example3": { "value": { "title": "New title", "content": "New content" } }
-              }
-            }
-          }
-        },
+        "summary": "Get a post by ID",
+        "parameters": [{ "$ref": "#/parameters/PostIdParam" }],
         "responses": {
-          "200": {
-            "description": "Updated post",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Post" } } }
-          },
-          "404": {
-            "description": "Post not found",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          "200": { "description": "Post", "schema": { "$ref": "#/definitions/Post" } },
+          "404": { "description": "Not Found", "schema": { "$ref": "#/definitions/Error" } }
+        }
+      },
+      "put": {
+        "tags": ["Post"],
+        "summary": "Update a post (partial fields allowed)",
+        "parameters": [
+          { "$ref": "#/parameters/PostIdParam" },
+          {
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": { "$ref": "#/definitions/PostUpdate" }
           }
+        ],
+        "responses": {
+          "200": { "description": "Updated", "schema": { "$ref": "#/definitions/Post" } },
+          "400": { "description": "Bad Request", "schema": { "$ref": "#/definitions/Error" } },
+          "404": { "description": "Not Found", "schema": { "$ref": "#/definitions/Error" } },
+          "415": { "description": "Unsupported Media Type", "schema": { "$ref": "#/definitions/Error" } }
         }
       },
       "delete": {
-        "summary": "Delete a post by ID",
         "tags": ["Post"],
-        "parameters": [
-          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
-        ],
+        "summary": "Delete a post",
+        "parameters": [{ "$ref": "#/parameters/PostIdParam" }],
+        "responses": {
+          "200": { "description": "Deleted", "schema": { "$ref": "#/definitions/Message" } },
+          "404": { "description": "Not Found", "schema": { "$ref": "#/definitions/Error" } }
+        }
+      }
+    },
+
+    "/api/posts/{id}/like": {
+      "post": {
+        "tags": ["Like"],
+        "summary": "Increment like counter",
+        "parameters": [{ "$ref": "#/parameters/PostIdParam" }],
         "responses": {
           "200": {
-            "description": "Deletion message",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeleteResponse" } } }
+            "description": "New like count",
+            "schema": { "$ref": "#/definitions/LikeResult" }
           },
-          "404": {
-            "description": "Post not found",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          "404": { "description": "Not Found", "schema": { "$ref": "#/definitions/Error" } }
+        }
+      }
+    },
+
+    "/api/posts/{id}/comments": {
+      "get": {
+        "tags": ["Comment"],
+        "summary": "List comments for a post",
+        "parameters": [{ "$ref": "#/parameters/PostIdParam" }],
+        "responses": {
+          "200": {
+            "description": "Array of comments",
+            "schema": { "type": "array", "items": { "$ref": "#/definitions/Comment" } }
+          },
+          "404": { "description": "Not Found", "schema": { "$ref": "#/definitions/Error" } }
+        }
+      },
+      "post": {
+        "tags": ["Comment"],
+        "summary": "Add a comment to a post",
+        "parameters": [
+          { "$ref": "#/parameters/PostIdParam" },
+          {
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": { "$ref": "#/definitions/CommentCreate" }
           }
+        ],
+        "responses": {
+          "201": { "description": "Created", "schema": { "$ref": "#/definitions/Comment" } },
+          "400": { "description": "Bad Request", "schema": { "$ref": "#/definitions/Error" } },
+          "404": { "description": "Not Found", "schema": { "$ref": "#/definitions/Error" } },
+          "415": { "description": "Unsupported Media Type", "schema": { "$ref": "#/definitions/Error" } }
         }
       }
     }
   },
-  "components": {
-    "schemas": {
-      "Post": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "title": { "type": "string" },
-          "content": { "type": "string" }
-        },
-        "required": ["id", "title", "content"]
-      },
-      "NewPost": {
-        "type": "object",
-        "properties": {
-          "title": { "type": "string" },
-          "content": { "type": "string" }
-        },
-        "required": ["title", "content"]
-      },
-      "UpdatePost": {
-        "type": "object",
-        "properties": {
-          "title": { "type": "string", "nullable": true },
-          "content": { "type": "string", "nullable": true }
-        },
-        "additionalProperties": false
-      },
-      "DeleteResponse": {
-        "type": "object",
-        "properties": {
-          "message": { "type": "string" }
-        },
-        "required": ["message"]
-      },
-      "HealthResponse": {
-        "type": "object",
-        "properties": {
-          "status": { "type": "string", "example": "ok" }
-        },
-        "required": ["status"]
-      },
-      "Error": {
-        "type": "object",
-        "properties": {
-          "message": { "type": "string" }
-        },
-        "required": ["message"]
-      },
-      "ValidationError": {
-        "type": "object",
-        "properties": {
-          "message": { "type": "string", "example": "Missing or empty required field(s)." },
-          "missing": {
-            "type": "array",
-            "items": { "type": "string", "enum": ["title", "content"] }
-          }
-        },
-        "required": ["message"]
+
+  "parameters": {
+    "PostIdParam": {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "integer",
+      "format": "int32",
+      "minimum": 1,
+      "description": "Post ID"
+    }
+  },
+
+  "definitions": {
+    "Health": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "example": "ok" }
       }
+    },
+
+    "Message": {
+      "type": "object",
+      "properties": {
+        "message": { "type": "string" }
+      },
+      "required": ["message"]
+    },
+
+    "Error": {
+      "type": "object",
+      "properties": {
+        "message": { "type": "string" },
+        "missing": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Missing or invalid fields (when applicable)"
+        }
+      },
+      "required": ["message"]
+    },
+
+    "Post": {
+      "type": "object",
+      "properties": {
+        "id":       { "type": "integer", "format": "int32" },
+        "title":    { "type": "string",  "example": "My Post" },
+        "content":  { "type": "string",  "example": "Hello world" },
+        "author":   { "type": "string",  "example": "Alice" },
+        "date":     { "type": "string",  "example": "2025-09-28", "description": "YYYY-MM-DD" },
+        "likes":    { "type": "integer", "format": "int32", "example": 0 },
+        "comments": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Comment" }
+        }
+      },
+      "required": ["id", "title", "content", "author", "date", "likes", "comments"]
+    },
+
+    "PostCreate": {
+      "type": "object",
+      "properties": {
+        "title":   { "type": "string", "example": "My Post" },
+        "content": { "type": "string", "example": "Hello world" },
+        "author":  { "type": "string", "example": "Alice" },
+        "date":    { "type": "string", "example": "2025-09-28", "description": "YYYY-MM-DD (1900..2100)" }
+      },
+      "required": ["title", "content", "author", "date"]
+    },
+
+    "PostUpdate": {
+      "type": "object",
+      "properties": {
+        "title":   { "type": "string" },
+        "content": { "type": "string" },
+        "author":  { "type": "string" },
+        "date":    { "type": "string", "description": "YYYY-MM-DD (1900..2100)" }
+      }
+    },
+
+    "LikeResult": {
+      "type": "object",
+      "properties": {
+        "id":    { "type": "integer", "format": "int32" },
+        "likes": { "type": "integer", "format": "int32" }
+      },
+      "required": ["id", "likes"]
+    },
+
+    "Comment": {
+      "type": "object",
+      "properties": {
+        "id":     { "type": "integer", "format": "int32" },
+        "author": { "type": "string", "example": "Bob" },
+        "text":   { "type": "string", "example": "Nice post!" },
+        "date":   { "type": "string", "example": "2025-09-28", "description": "YYYY-MM-DD (server-set)" }
+      },
+      "required": ["id", "author", "text", "date"]
+    },
+
+    "CommentCreate": {
+      "type": "object",
+      "properties": {
+        "author": { "type": "string", "example": "Bob" },
+        "text":   { "type": "string", "example": "Nice post!" }
+      },
+      "required": ["author", "text"]
     }
   }
 }

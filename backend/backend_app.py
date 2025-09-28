@@ -1,5 +1,5 @@
 # backend_app.py
-"""Blog backend with JSON file persistence, likes and comments.
+"""Blog backend with JSON file persistence, likes and comments, and Swagger UI.
 
 - Stores posts in posts.json (atomic writes, lock-protected)
 - Post fields: id, title, content, author, date (YYYY-MM-DD),
@@ -14,6 +14,8 @@
     POST   /api/posts/<id>/like
     GET    /api/posts/<id>/comments
     POST   /api/posts/<id>/comments
+- Swagger UI:
+    GET    /api/docs            (loads /static/masterblog.json)
 """
 
 from __future__ import annotations
@@ -21,11 +23,15 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from flask import Flask, jsonify, request, make_response
+from werkzeug.exceptions import HTTPException
 
 try:
-    from flask_cors import CORS  # optional, for dev on different ports
+    # Optional CORS for dev (frontend on other port)
+    from flask_cors import CORS
 except ImportError:  # pragma: no cover
     CORS = None  # type: ignore
+
+from flask_swagger_ui import get_swaggerui_blueprint
 
 import json
 import os
@@ -33,8 +39,24 @@ import tempfile
 import threading
 
 app = Flask(__name__)
+# Limit request body size (anti-abuse)
+app.config["MAX_CONTENT_LENGTH"] = 256 * 1024  # 256 KB
+
 if CORS:
+    # In production, restrict origins instead of wildcard
     CORS(app)
+
+# ----------------------- Swagger UI -----------------------
+
+SWAGGER_URL = "/api/docs"               # UI endpoint
+API_URL = "/static/masterblog.json"     # served from ./static/masterblog.json
+
+swagger_ui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+    config={"app_name": "Masterblog API"},
+)
+app.register_blueprint(swagger_ui_blueprint, url_prefix=SWAGGER_URL)
 
 # ----------------------- File persistence -----------------------
 
@@ -47,6 +69,7 @@ MAX_DATE = datetime(2100, 12, 31)
 
 
 def _atomic_write(path: str, data: str) -> None:
+    """Atomically write data to disk to avoid partial writes."""
     dir_ = os.path.dirname(path) or "."
     fd, tmp_path = tempfile.mkstemp(prefix=".__tmp__", dir=dir_)
     try:
@@ -62,6 +85,7 @@ def _atomic_write(path: str, data: str) -> None:
 
 
 def _load_posts() -> List[Dict[str, Any]]:
+    """Load posts; seed file on first run."""
     if not os.path.exists(_STORAGE_FILE):
         seed = [
             {
@@ -87,7 +111,7 @@ def _load_posts() -> List[Dict[str, Any]]:
         return seed
 
     try:
-        with _LOCK, open(_STORAGE_FILE, "r", encoding="utf-8") as f:
+        with open(_STORAGE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data if isinstance(data, list) else []
     except (json.JSONDecodeError, OSError):
@@ -95,6 +119,7 @@ def _load_posts() -> List[Dict[str, Any]]:
 
 
 def _save_posts(posts: List[Dict[str, Any]]) -> None:
+    """Persist posts list to disk (atomic)."""
     with _LOCK:
         payload = json.dumps(posts, ensure_ascii=False, indent=2)
         _atomic_write(_STORAGE_FILE, payload)
@@ -111,6 +136,7 @@ def _as_str(x: Any) -> str:
 
 
 def _parse_date_str(date_str: str) -> Optional[datetime]:
+    """Validate 'YYYY-MM-DD' within MIN_DATE..MAX_DATE."""
     if not date_str:
         return None
     try:
@@ -123,6 +149,7 @@ def _parse_date_str(date_str: str) -> Optional[datetime]:
 
 
 def _serialize(p: Dict[str, Any]) -> Dict[str, Any]:
+    """Shape API output consistently."""
     return {
         "id": int(p["id"]),
         "title": p.get("title", ""),
@@ -136,6 +163,26 @@ def _serialize(p: Dict[str, Any]) -> Dict[str, Any]:
 
 def _find_post(posts: List[Dict[str, Any]], post_id: int) -> Optional[Dict[str, Any]]:
     return next((p for p in posts if int(p.get("id")) == post_id), None)
+
+
+def _require_json():
+    """Return (resp, code) if invalid Content-Type for JSON endpoints."""
+    if not request.is_json:
+        return jsonify({"message": "Content-Type must be application/json"}), 415
+    return None
+
+
+# ----------------------------- Error Handling -----------------------------
+
+@app.errorhandler(HTTPException)
+def handle_http_error(e: HTTPException):
+    return jsonify({"message": e.description or e.name}), e.code
+
+
+@app.errorhandler(Exception)
+def handle_unexpected(e: Exception):
+    # In production, log exception with stacktrace
+    return jsonify({"message": "Internal server error"}), 500
 
 
 # ----------------------------- Endpoints -----------------------------
@@ -162,6 +209,10 @@ def get_post(post_id: int):
 
 @app.post("/api/posts")
 def create_post():
+    err = _require_json()
+    if err:
+        return err
+
     data = request.get_json(silent=True) or {}
     title = _as_str(data.get("title"))
     content = _as_str(data.get("content"))
@@ -196,11 +247,19 @@ def create_post():
     }
     posts.append(post)
     _save_posts(posts)
-    return make_response(jsonify(_serialize(post)), 201)
+
+    resp = jsonify(_serialize(post))
+    out = make_response(resp, 201)
+    out.headers["Location"] = f"/api/posts/{post['id']}"
+    return out
 
 
 @app.put("/api/posts/<int:post_id>")
 def update_post(post_id: int):
+    err = _require_json()
+    if err:
+        return err
+
     posts = _load_posts()
     target = _find_post(posts, post_id)
     if not target:
@@ -252,6 +311,7 @@ def like_post(post_id: int):
     target = _find_post(posts, post_id)
     if not target:
         return jsonify({"message": f"Post with id {post_id} was not found."}), 404
+
     target["likes"] = int(target.get("likes", 0) or 0) + 1
     _save_posts(posts)
     return jsonify({"id": post_id, "likes": int(target["likes"])}), 200
@@ -270,6 +330,10 @@ def list_comments(post_id: int):
 
 @app.post("/api/posts/<int:post_id>/comments")
 def add_comment(post_id: int):
+    err = _require_json()
+    if err:
+        return err
+
     posts = _load_posts()
     target = _find_post(posts, post_id)
     if not target:
@@ -296,4 +360,5 @@ def add_comment(post_id: int):
 
 
 if __name__ == "__main__":
+    # Ensure ./static/masterblog.json exists; Flask serves /static/* by default.
     app.run(host="0.0.0.0", port=5002, debug=True)
