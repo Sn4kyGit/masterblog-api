@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Edit • MasterBlog</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <header class="hero">
+      <h1 class="title">Edit Post</h1>
+      <p class="subtitle">Update title, content, author and date</p>
+    </header>
+
+    <main class="wrap">
+      <form method="post" class="card">
+        <h2 class="section">Edit</h2>
+
+        {% if error %}
+          <p class="error">{{ error }}</p>
+        {% endif %}
+
+        <label for="title">Title</label>
+        <input id="title" name="title" required value="{{ post.title }}" />
+
+        <label for="content">Content</label>
+        <textarea id="content" name="content" required>{{ post.content }}</textarea>
+
+        <label for="author">Author</label>
+        <input id="author" name="author" required value="{{ post.author }}" />
+
+        <label for="date">Date</label>
+        <input id="date" name="date" type="date" required value="{{ post.date }}" min="{{ MIN_DATE }}" max="{{ MAX_DATE }}" />
+
+        <div class="actions">
+          <button class="btn" type="submit">Save</button>
+          <a class="btn secondary" href="{{ url_for('home') }}">Cancel</a>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

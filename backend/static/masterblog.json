@@ -2,8 +2,8 @@
   "swagger": "2.0",
   "info": {
     "title": "Masterblog API",
-    "version": "1.1.0",
-    "description": "CRUD for posts with likes and comments. Dates use YYYY-MM-DD (1900-01-01 .. 2100-12-31)."
+    "version": "1.1.2",
+    "description": "CRUD for posts with likes and comments. Dates use YYYY-MM-DD (1900-01-01 .. 2100-12-31). Note: the 'author' field is OPTIONAL when creating posts."
   },
   "host": "localhost:5002",
   "basePath": "/",
@@ -13,7 +13,7 @@
 
   "tags": [
     { "name": "Health", "description": "Service health" },
-    { "name": "Post", "description": "Post CRUD & listing" },
+    { "name": "Post", "description": "Post CRUD, listing, and search" },
     { "name": "Like", "description": "Post likes" },
     { "name": "Comment", "description": "Post comments" }
   ],
@@ -32,12 +32,31 @@
     "/api/posts": {
       "get": {
         "tags": ["Post"],
-        "summary": "List all posts",
+        "summary": "List all posts (optionally sorted)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sort",
+            "type": "string",
+            "enum": ["title", "content"],
+            "required": false,
+            "description": "Sort field"
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "type": "string",
+            "enum": ["asc", "desc"],
+            "required": false,
+            "description": "Sort direction (default: asc). Returns 400 on invalid value."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Array of posts",
             "schema": { "type": "array", "items": { "$ref": "#/definitions/Post" } }
-          }
+          },
+          "400": { "description": "Invalid sort field or direction", "schema": { "$ref": "#/definitions/Error" } }
         }
       },
       "post": {
@@ -61,6 +80,35 @@
           },
           "400": { "description": "Bad Request", "schema": { "$ref": "#/definitions/Error" } },
           "415": { "description": "Unsupported Media Type", "schema": { "$ref": "#/definitions/Error" } }
+        }
+      }
+    },
+
+    "/api/posts/search": {
+      "get": {
+        "tags": ["Post"],
+        "summary": "Search posts by title/content (case-insensitive)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "title",
+            "type": "string",
+            "required": false,
+            "description": "Substring to match in the post title (case-insensitive)"
+          },
+          {
+            "in": "query",
+            "name": "content",
+            "type": "string",
+            "required": false,
+            "description": "Substring to match in the post content (case-insensitive)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of posts matching the criteria (empty array if none match)",
+            "schema": { "type": "array", "items": { "$ref": "#/definitions/Post" } }
+          }
         }
       }
     },
@@ -202,7 +250,7 @@
         "id":       { "type": "integer", "format": "int32" },
         "title":    { "type": "string",  "example": "My Post" },
         "content":  { "type": "string",  "example": "Hello world" },
-        "author":   { "type": "string",  "example": "Alice" },
+        "author":   { "type": "string",  "example": "Alice", "description": "Optional" },
         "date":     { "type": "string",  "example": "2025-09-28", "description": "YYYY-MM-DD" },
         "likes":    { "type": "integer", "format": "int32", "example": 0 },
         "comments": {
@@ -210,7 +258,7 @@
           "items": { "$ref": "#/definitions/Comment" }
         }
       },
-      "required": ["id", "title", "content", "author", "date", "likes", "comments"]
+      "required": ["id", "title", "content", "date", "likes", "comments"]
     },
 
     "PostCreate": {
@@ -218,10 +266,10 @@
       "properties": {
         "title":   { "type": "string", "example": "My Post" },
         "content": { "type": "string", "example": "Hello world" },
-        "author":  { "type": "string", "example": "Alice" },
+        "author":  { "type": "string", "example": "Alice", "description": "Optional" },
         "date":    { "type": "string", "example": "2025-09-28", "description": "YYYY-MM-DD (1900..2100)" }
       },
-      "required": ["title", "content", "author", "date"]
+      "required": ["title", "content", "date"]
     },
 
     "PostUpdate": {

@@ -1,29 +1,293 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blog Posts</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="static/styles.css">
-</head>
-<body>
-    <div class="container">
-        <h1>📚 Blog Posts</h1>
-        <div class="input-field">
-            <input type="text" id="api-base-url" placeholder="Enter API Base URL" value="http://127.0.0.1:5002/api">
-            <button onclick="loadPosts()">Load Posts</button>
-        </div>
-        <div class="input-field">
-            <input type="text" id="post-title" placeholder="Enter Post Title">
-            <input type="text" id="post-content" placeholder="Enter Post Content">
-            <button onclick="addPost()">Add Post</button>
-        </div>
-        <div id="post-container">
-            <!-- Blog posts will be inserted here by JavaScript -->
-        </div>
-    </div>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="MasterBlog frontend – search & sort posts, create, edit and delete entries."
+    />
+    <title>MasterBlog • Frontend</title>
 
-    <script src="static/main.js"></script>
-</body>
+    <!-- CSS served by Flask static -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+
+    <!-- Progressive enhancement: if JS is disabled, Selects bleiben nutzbar (Default-Werte) -->
+    <noscript>
+      <style>
+        .js-note { display: block !important; }
+      </style>
+    </noscript>
+  </head>
+
+  <body>
+    <!-- Skip link for keyboard/AT users -->
+    <a href="#main" class="visually-hidden-focusable">Skip to content</a>
+
+    <header class="hero" role="banner">
+      <h1 class="title">MasterBlog</h1>
+      <p class="subtitle">A minimal blog engine with posts, likes &amp; comments</p>
+    </header>
+
+    <main id="main" class="wrap">
+      <!-- Search & Sort Controls -->
+      <section class="card filter" aria-labelledby="searchSortHeading">
+        <h2 id="searchSortHeading" class="section">Search &amp; Sort</h2>
+
+        <form
+          method="get"
+          action="{{ url_for('home') }}"
+          role="search"
+          aria-describedby="resultCount"
+          class="toolbar"
+        >
+          <fieldset>
+            <legend class="sr-only">Filter by title and content</legend>
+
+            <div>
+              <label for="q_title">Title contains</label>
+              <input
+                id="q_title"
+                name="title"
+                class="input-pill"
+                value="{{ q_title or '' }}"
+                placeholder="e.g. Flask"
+                autocomplete="off"
+                inputmode="search"
+              />
+            </div>
+
+            <div>
+              <label for="q_content">Content contains</label>
+              <input
+                id="q_content"
+                name="content"
+                class="input-pill"
+                value="{{ q_content or '' }}"
+                placeholder="e.g. SQLAlchemy"
+                autocomplete="off"
+                inputmode="search"
+              />
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend class="sr-only">Sort results</legend>
+
+            <div>
+              <label for="sort">Sort by</label>
+              <!-- data-selected vermeidet Jinja in <option> Attributen -->
+              <select
+                id="sort"
+                name="sort"
+                class="select-pill"
+                data-selected="{{ sort_field or '' }}"
+              >
+                <option value="">Original</option>
+                <option value="title">Title</option>
+                <option value="content">Content</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="direction">Direction</label>
+              <select
+                id="direction"
+                name="direction"
+                class="select-pill"
+                data-selected="{{ direction or 'asc' }}"
+              >
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+              </select>
+            </div>
+          </fieldset>
+
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-lg" type="submit">Apply</button>
+            <a class="btn secondary btn-lg" href="{{ url_for('home') }}">Reset</a>
+          </div>
+
+          <p id="resultCount" class="muted js-note" style="display:none;">
+            JavaScript is disabled. Sort selections will default to Original/Ascending.
+          </p>
+        </form>
+
+        {% if error %}
+          <!-- aria-live: screenreader geben Änderungen aus -->
+          <p class="error" aria-live="polite" style="margin-top:8px;">
+            {{ error }}
+          </p>
+        {% endif %}
+
+        <p class="muted" style="margin-top:8px;">
+          Showing {{ posts|length }} post{{ '' if posts|length==1 else 's' }}.
+        </p>
+      </section>
+
+      <!-- Posts List -->
+      <section class="card" aria-labelledby="postsHeading">
+        <h2 id="postsHeading" class="section">Posts</h2>
+
+        {% if posts %}
+          <ul class="list" role="list">
+            {% for p in posts %}
+              <li>
+                <article class="item" aria-labelledby="post-{{ p.id }}-title">
+                  <div class="stack">
+                    <h3 id="post-{{ p.id }}-title" style="margin:0">{{ p.title }}</h3>
+
+                    <p class="muted">
+                      <span class="sr-only">Author:</span>{{ p.author }}
+                      &nbsp;•&nbsp;
+                      <span class="sr-only">Date:</span>
+                      <time datetime="{{ p.date }}">{{ p.date }}</time>
+                      &nbsp;•&nbsp;
+                      <span aria-label="Likes">❤️ {{ p.likes }}</span>
+                    </p>
+
+                    <p style="margin:0">{{ p.content }}</p>
+
+                    <div class="actions" role="group" aria-label="Post actions">
+                      <form method="post" action="{{ url_for('edit', post_id=p.id) }}">
+                        <button class="btn secondary" type="submit">Edit</button>
+                      </form>
+
+                      <form
+                        method="post"
+                        action="{{ url_for('delete', post_id=p.id) }}"
+                        onsubmit="return confirm('Delete this post?')"
+                      >
+                        <button class="btn danger" type="submit">Delete</button>
+                      </form>
+                    </div>
+                  </div>
+                </article>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted">No posts found for the current filters.</p>
+        {% endif %}
+      </section>
+
+      <!-- Create New Post -->
+      <section class="card" aria-labelledby="createHeading">
+        <h2 id="createHeading" class="section">New Post</h2>
+
+        <form id="createForm" method="post" action="{{ url_for('home') }}" novalidate>
+          <label for="title">Title</label>
+          <input
+            id="title"
+            name="title"
+            class="input-pill"
+            required
+            maxlength="255"
+            autocomplete="off"
+          />
+
+          <label for="content">Content</label>
+          <textarea
+            id="content"
+            name="content"
+            class="textarea-soft"
+            required
+            rows="6"
+          ></textarea>
+
+          <label for="author">Author</label>
+          <input
+            id="author"
+            name="author"
+            class="input-pill"
+            required
+            autocomplete="name"
+          />
+
+          <label for="date">Date</label>
+          <input
+            id="date"
+            name="date"
+            type="date"
+            class="input-pill"
+            required
+            min="{{ MIN_DATE }}"
+            max="{{ MAX_DATE }}"
+          />
+          <p id="dateErrorCreate" class="error" style="display:none" aria-live="polite">
+            Invalid date. Allowed range is {{ MIN_DATE }} to {{ MAX_DATE }}.
+          </p>
+
+          <div class="actions">
+            <button class="btn btn-lg" type="submit">Create</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      // Keep JS tiny and unobtrusive; no framework needed.
+      (function () {
+        // Apply 'selected' in <select> based on data-selected to avoid Jinja in attributes.
+        function applySelected(id) {
+          var el = document.getElementById(id);
+          if (!el) return;
+          var want = el.getAttribute('data-selected') || '';
+          for (var i = 0; i < el.options.length; i++) {
+            if (el.options[i].value === want) {
+              el.selectedIndex = i;
+              break;
+            }
+          }
+        }
+        applySelected('sort');
+        applySelected('direction');
+
+        // Simple client-side date validation for the Create form
+        var form = document.getElementById('createForm');
+        var dateInput = document.getElementById('date');
+        var err = document.getElementById('dateErrorCreate');
+
+        function isValidDate(d) {
+          if (!d) return false;
+          // Compare as strings since format is YYYY-MM-DD
+          return d >= '{{ MIN_DATE }}' && d <= '{{ MAX_DATE }}';
+        }
+
+        form.addEventListener('submit', function (e) {
+          var v = dateInput.value;
+          if (!isValidDate(v)) {
+            e.preventDefault();
+            err.style.display = 'block';
+          } else {
+            err.style.display = 'none';
+          }
+        });
+      })();
+    </script>
+
+    <!-- a11y helper classes -->
+    <style>
+      .sr-only {
+        position: absolute !important;
+        width: 1px; height: 1px;
+        padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0,0,0,0);
+        white-space: nowrap; border: 0;
+      }
+      .visually-hidden-focusable {
+        position: absolute;
+        left: -9999px;
+      }
+      .visually-hidden-focusable:focus {
+        left: 16px; top: 8px; background: #fff; color: #000;
+        padding: 6px 10px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+        z-index: 1000;
+      }
+    </style>
+  </body>
 </html>
